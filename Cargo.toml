@@ -18,6 +18,10 @@ include = [
     "LICENSE",
 ]
 
+[lib]
+name = "svg2pts_lib"
+path = "src/lib.rs"
+
 [features]
 default = []
 text = ["usvg/text"]
