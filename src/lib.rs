@@ -1,16 +1,15 @@
+use kurbo::common::solve_quadratic; // usvg already uses kurbo
 use lyon_geom::cubic_bezier::CubicBezierSegment;
 use lyon_geom::euclid::Vector2D;
 use std::fs::File;
-use std::io::prelude::*;
 use std::io;
+use std::io::prelude::*;
 use usvg::prelude::*;
-use kurbo::common::solve_quadratic; // usvg already uses kurbo
-use usvg::{NodeKind, Options, PathSegment, Tree, TransformedPath};
+use usvg::{NodeKind, Options, PathSegment, TransformedPath, Tree};
 
 mod errors {
     use error_chain::error_chain;
-    error_chain! {
-    }
+    error_chain! {}
 }
 use errors::*;
 type Pt = Vector2D<f64, lyon_geom::euclid::UnknownUnit>;
@@ -34,12 +33,12 @@ impl PathWriter {
             last: Pt::default(),
             pts: vec![],
             accuracy,
-            height
+            height,
         }
     }
 
     fn write_pt(&mut self, pt: Pt) {
-        self.pts.push(pt);
+        self.pts.push(Pt::new(pt.x, self.height - pt.y));
     }
 
     fn move_to(&mut self, pt: Pt) {
@@ -51,6 +50,7 @@ impl PathWriter {
 
     fn write_path(&mut self, path: impl Iterator<Item = PathSegment>) -> io::Result<()> {
         use PathSegment::*;
+
         for seg in path {
             match seg {
                 MoveTo { x, y } => {
@@ -62,7 +62,14 @@ impl PathWriter {
                 ClosePath => {
                     self.close_path();
                 }
-                CurveTo { x1, y1, x2, y2, x, y } => {
+                CurveTo {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x,
+                    y,
+                } => {
                     let bez = CubicBezierSegment {
                         from: (self.last.x, self.last.y).into(),
                         ctrl1: (x1, y1).into(),
@@ -88,16 +95,13 @@ impl PathWriter {
         // target_dist away from self.current
         let w = line_end - self.current;
         let v = self.last - line_end;
-        let c = w.square_length() - self.target_dist* self.target_dist;
-        if c < 0.0 { // line_end is two close
+        let c = w.square_length() - self.target_dist * self.target_dist;
+        if c < 0.0 {
+            // line_end is two close
             self.last = line_end;
         }
 
-        let intersect = solve_quadratic(
-            c,
-            2.0*(v.dot(w)),
-            v.square_length()
-        );
+        let intersect = solve_quadratic(c, 2.0 * (v.dot(w)), v.square_length());
 
         let mut t_min = 2.0;
         for t in intersect {
@@ -141,28 +145,32 @@ impl PathWriter {
     }
 }
 
-fn path_distance(
-    acc: f64,
-    paths: impl Iterator<Item = PathSegment>,
-) -> f64 {
+fn path_distance(acc: f64, paths: impl Iterator<Item = PathSegment>) -> f64 {
     use PathSegment::*;
-    let mut last = (0.0,0.0);
-    let mut start = (0.0,0.0);
+    let mut last = (0.0, 0.0);
+    let mut start = (0.0, 0.0);
     let mut dist = 0.0;
     for seg in paths {
         match seg {
             MoveTo { x, y } => {
-                last = (x,y);
+                last = (x, y);
                 start = last;
             }
             LineTo { x, y } => {
                 dist += (Pt::new(x, y) - Pt::from(last)).length();
-                last = (x,y);
+                last = (x, y);
             }
             ClosePath => {
                 dist += (Pt::from(start) - Pt::from(last)).length();
             }
-            CurveTo { x1, y1, x2, y2, x, y } => {
+            CurveTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
                 let bez = CubicBezierSegment {
                     from: last.into(),
                     ctrl1: (x1, y1).into(),
@@ -170,16 +178,16 @@ fn path_distance(
                     to: (x, y).into(),
                 };
                 dist += bez.approximate_length(acc);
-                last = (x,y);
+                last = (x, y);
             }
         }
     }
     dist
 }
 
+use std::rc::Rc;
 use usvg::PathData;
 use usvg::Transform;
-use std::rc::Rc;
 
 fn extract_paths(svg: &Tree) -> Vec<(Rc<PathData>, Transform)> {
     let mut paths = Vec::default();
@@ -193,33 +201,41 @@ fn extract_paths(svg: &Tree) -> Vec<(Rc<PathData>, Transform)> {
     paths
 }
 
-
-pub fn get_path_from_file(filename: &str, point_distance: f64, point_accuracy: f64) -> Vec<(f64, f64)> {
+pub fn get_path_from_file(
+    filename: &str,
+    point_accuracy: f64,
+    point_number: u64,
+    point_distance: f64,
+) -> Vec<(f64, f64)> {
     let mut svg_buf = Vec::default();
 
     File::open(filename)
-        .chain_err(|| "Failed to open input").unwrap()
+        .chain_err(|| "Failed to open input")
+        .unwrap()
         .read_to_end(&mut svg_buf)
-        .chain_err(|| "Failed to read input").unwrap();
+        .chain_err(|| "Failed to read input")
+        .unwrap();
 
     let tree = Tree::from_data(&svg_buf, &Options::default())
-        .chain_err(|| "unable to parse svg").unwrap();
+        .chain_err(|| "unable to parse svg")
+        .unwrap();
 
     let paths = extract_paths(&tree);
 
     let height = tree.svg_node().view_box.rect.height();
 
-    let distance = if point_distance > 0.0 {
-        let path_distance:f64 = paths.iter().map(|(path, transform)| path_distance(
-            0.05, TransformedPath::new(path, *transform)
-        )).sum();
-        path_distance / (point_distance as f64)
+    let distance = if point_number > 0 {
+        let path_distance: f64 = paths
+            .iter()
+            .map(|(path, transform)| path_distance(0.05, TransformedPath::new(path, *transform)))
+            .sum();
+        path_distance / (point_number as f64)
     } else {
         point_distance
     };
 
-    let accuracy = if point_accuracy != 0.0 {
-        point_accuracy
+    let accuracy = if distance == 0.0 {
+        0.05
     } else {
         distance / 25.0
     };
@@ -227,8 +243,9 @@ pub fn get_path_from_file(filename: &str, point_distance: f64, point_accuracy: f
     let mut writer = PathWriter::new(distance, accuracy, height);
 
     for (path, transform) in &paths {
-        writer.write_path(TransformedPath::new(path, *transform))
-            .chain_err(|| "failed writing points").unwrap();
+        writer
+            .write_path(TransformedPath::new(path, *transform))
+            .chain_err(|| "failed writing points");
     }
 
     writer.pts.iter().map(|pt| (pt.x, pt.y)).collect()
