@@ -203,7 +203,6 @@ fn extract_paths(svg: &Tree) -> Vec<(Rc<PathData>, Transform)> {
 
 pub fn get_path_from_file(
     filename: &str,
-    point_accuracy: f64,
     point_number: u64,
     point_distance: f64,
 ) -> Vec<(f64, f64)> {
@@ -245,7 +244,7 @@ pub fn get_path_from_file(
     for (path, transform) in &paths {
         writer
             .write_path(TransformedPath::new(path, *transform))
-            .chain_err(|| "failed writing points");
+            .chain_err(|| "failed writing points").unwrap();
     }
 
     writer.pts.iter().map(|pt| (pt.x, pt.y)).collect()
